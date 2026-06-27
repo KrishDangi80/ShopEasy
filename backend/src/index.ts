@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { get_order, search_products, get_product } from './tools/tools';
 import { planFromLLM } from './llm/planner';
+import { answerWithGemini } from './llm/gemini';
 
 dotenv.config();
 const app = express();
@@ -68,19 +69,32 @@ app.post('/api/agent', async (req, res) => {
             steps.push({ action: step.tool, error: err.message || String(err) });
           }
         }
-        // Compose a friendly reply from the final steps
-        const lastOrder = steps.find((s) => s.action === 'get_order')?.order;
-        const lastProduct = steps.reverse().find((s) => s.action === 'get_product')?.product;
-        if (lastProduct) {
-          const reply = `I found ${lastProduct.name} for $${lastProduct.price}. ${lastProduct.stock}. Is there anything else I can help with?`;
-          return res.json({ reply, steps });
-        }
-        if (lastOrder) {
-          const reply = `Your order ${lastOrder.order_id} is ${lastOrder.status}. ETA: ${lastOrder.eta}. Anything else?`;
-          return res.json({ reply, steps });
-        }
-        return res.json({ reply: "I couldn't complete all steps — here's what I tried.", steps });
+        const reply = await answerWithGemini(
+          message,
+          JSON.stringify(
+            {
+              toolResults: steps,
+              guidance: 'Use only the facts in toolResults. If a tool failed, mention that briefly and offer help.'
+            },
+            null,
+            2
+          )
+        );
+        return res.json({ reply, steps });
       }
+
+      const reply = await answerWithGemini(
+        message,
+        JSON.stringify(
+          {
+            toolResults: [],
+            guidance: 'No tools were required. Answer the user naturally and helpfully.'
+          },
+          null,
+          2
+        )
+      );
+      return res.json({ reply, steps });
     }
 
     // Fallback heuristics (previous behavior)
